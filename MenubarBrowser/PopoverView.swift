@@ -11,12 +11,12 @@ internal import WebKit
 struct PopoverView: View {
     @State private var urlText = ""
     @State private var canGoBack = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 8) {
 
             HStack {
-                // ◀️ 뒤로가기
                 Button {
                     NotificationCenter.default.post(name: .goBack, object: nil)
                 } label: {
@@ -32,13 +32,50 @@ struct PopoverView: View {
                         removeFocus()
                     }
                 
-                Button {
-                    loadURL()
-                    removeFocus()
+                
+                
+                Menu {
+                    Button("바브라우저에 관하여") {
+                        if let window = NSApp.keyWindow {
+                            window.orderOut(nil)
+                        }
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            NSApp.setActivationPolicy(.regular)
+                            openWindow(id: "about_window")
+                            NSApp.activate(ignoringOtherApps: true)
+                        }
+                    }
+                    
+//                    Button("환경설정") {
+//                        if let window = NSApp.keyWindow {
+//                            window.orderOut(nil)
+//                        }
+//                        
+//                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+//                            NSApp.setActivationPolicy(.regular)
+//                            openWindow(id: "settings_window")
+//                            NSApp.activate(ignoringOtherApps: true)
+//                        }
+//                    }
+
+                    Divider()
+
+                    Button("종료") {
+                        NSApplication.shared.terminate(nil)
+                    }
                 } label: {
-                    Image(systemName: "arrow.right.circle.fill")
+                    Image(systemName: "gearshape")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 18, height: 18)
+                        .foregroundColor(.primary)
+                        .contentShape(Rectangle()) // 클릭 영역 확보
                 }
-                .disabled(!canGoBack)
+                .menuStyle(.borderlessButton) // 💡 macOS에서 배경 없이 아이콘만 남기는 스타일
+                .menuIndicator(.hidden)
+                .fixedSize() // 주변 레이아웃에 영향을 주지 않도록 고정
+                
             }
             .padding(.horizontal)
 
@@ -57,9 +94,14 @@ struct PopoverView: View {
         .onAppear {
             setupBackNavigation()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            NSApp.sendAction(#selector(NSPopover.performClose(_:)), to: nil, from: nil)
+        }
     }
 
-    // MARK: - Helpers
+    private func showSettings() {
+        
+    }
 
     private func loadURL() {
         var text = urlText.trimmingCharacters(in: .whitespaces)

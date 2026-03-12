@@ -36,5 +36,23 @@ struct MenubarBrowserApp: App {
                 .renderingMode(.template)
         }
         .menuBarExtraStyle(.window)
+        
+        // 바브라우저에 관하여
+        Window("바브라우저에 관하여", id: "about_window") {
+            AboutAppMenu()
+                .frame(minWidth: 300, minHeight: 280)
+        }
+        .windowResizability(.contentSize)
+        .windowStyle(.automatic)
+        .defaultSize(width: 300, height: 150)
+        
+        // 환경설정
+        Window("환경설정", id: "settings_window") {
+            SettingsPopMenu()
+                .frame(minWidth: 300, minHeight: 150)
+        }
+        .windowResizability(.contentSize)
+        .windowStyle(.automatic)
+        .defaultSize(width: 300, height: 150)
     }
 }
