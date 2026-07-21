@@ -91,11 +91,16 @@ struct PopoverView: View {
         }
         .padding(.top, 10)
         .frame(minWidth: 450, minHeight: 600)
-        .onAppear {
-            setupBackNavigation()
+        .onReceive(NotificationCenter.default.publisher(for: .goBack)) { _ in
+            WebViewHolder.shared.webView?.goBack()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loadURL)) { noti in
+            if let url = noti.object as? URL {
+                WebViewHolder.shared.webView?.load(URLRequest(url: url))
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-            NSApp.sendAction(#selector(NSPopover.performClose(_:)), to: nil, from: nil)
+            NSApp.keyWindow?.orderOut(nil)
         }
     }
 
@@ -116,26 +121,6 @@ struct PopoverView: View {
 
     private func removeFocus() {
         NSApp.keyWindow?.makeFirstResponder(nil)
-    }
-
-    private func setupBackNavigation() {
-        NotificationCenter.default.addObserver(
-            forName: .goBack,
-            object: nil,
-            queue: .main
-        ) { _ in
-            WebViewHolder.shared.webView?.goBack()
-        }
-
-        NotificationCenter.default.addObserver(
-            forName: .loadURL,
-            object: nil,
-            queue: .main
-        ) { noti in
-            if let url = noti.object as? URL {
-                WebViewHolder.shared.webView?.load(URLRequest(url: url))
-            }
-        }
     }
 }
 

@@ -23,13 +23,12 @@ struct WebView: NSViewRepresentable {
     @Binding var urlText: String
     @Binding var canGoBack: Bool
 
-    let webView = WKWebView()
-
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
 
     func makeNSView(context: Context) -> WKWebView {
+        let webView = WKWebView()
         webView.navigationDelegate = context.coordinator
 
         // 📱 모바일 User-Agent

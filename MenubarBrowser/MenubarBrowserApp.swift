@@ -41,6 +41,9 @@ struct MenubarBrowserApp: App {
         Window("바브라우저에 관하여", id: "about_window") {
             AboutAppMenu()
                 .frame(minWidth: 300, minHeight: 280)
+                .onDisappear {
+                    NSApp.setActivationPolicy(.accessory)
+                }
         }
         .windowResizability(.contentSize)
         .windowStyle(.automatic)
