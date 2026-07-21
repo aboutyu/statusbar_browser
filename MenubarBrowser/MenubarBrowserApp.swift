@@ -53,6 +53,9 @@ struct MenubarBrowserApp: App {
         Window("환경설정", id: "settings_window") {
             SettingsPopMenu()
                 .frame(minWidth: 300, minHeight: 150)
+                .onDisappear {
+                    NSApp.setActivationPolicy(.accessory)
+                }
         }
         .windowResizability(.contentSize)
         .windowStyle(.automatic)

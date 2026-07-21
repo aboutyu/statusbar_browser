@@ -35,6 +35,18 @@ struct PopoverView: View {
                 
                 
                 Menu {
+                    Button("설정") {
+                        if let window = NSApp.keyWindow {
+                            window.orderOut(nil)
+                        }
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            NSApp.setActivationPolicy(.regular)
+                            openWindow(id: "settings_window")
+                            NSApp.activate(ignoringOtherApps: true)
+                        }
+                    }
+
                     Button("바브라우저에 관하여") {
                         if let window = NSApp.keyWindow {
                             window.orderOut(nil)
@@ -46,18 +58,6 @@ struct PopoverView: View {
                             NSApp.activate(ignoringOtherApps: true)
                         }
                     }
-                    
-//                    Button("환경설정") {
-//                        if let window = NSApp.keyWindow {
-//                            window.orderOut(nil)
-//                        }
-//                        
-//                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-//                            NSApp.setActivationPolicy(.regular)
-//                            openWindow(id: "settings_window")
-//                            NSApp.activate(ignoringOtherApps: true)
-//                        }
-//                    }
 
                     Divider()
 
