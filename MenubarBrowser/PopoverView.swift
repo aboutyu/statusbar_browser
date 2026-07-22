@@ -36,9 +36,7 @@ struct PopoverView: View {
                 
                 Menu {
                     Button("설정") {
-                        if let window = NSApp.keyWindow {
-                            window.orderOut(nil)
-                        }
+                        NotificationCenter.default.post(name: .closePopover, object: nil)
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             NSApp.setActivationPolicy(.regular)
@@ -48,9 +46,7 @@ struct PopoverView: View {
                     }
 
                     Button("바브라우저에 관하여") {
-                        if let window = NSApp.keyWindow {
-                            window.orderOut(nil)
-                        }
+                        NotificationCenter.default.post(name: .closePopover, object: nil)
 
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             NSApp.setActivationPolicy(.regular)
@@ -99,13 +95,6 @@ struct PopoverView: View {
                 WebViewHolder.shared.webView?.load(URLRequest(url: url))
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-            NSApp.keyWindow?.orderOut(nil)
-        }
-    }
-
-    private func showSettings() {
-        
     }
 
     private func loadURL() {

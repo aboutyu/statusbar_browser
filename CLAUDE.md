@@ -4,9 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-바브라우저 (Bar Browser) is a macOS menu bar mini web browser built with SwiftUI + WebKit. It lives entirely
-in the menu bar (no Dock icon, `LSUIElement = YES`) and shows a `WKWebView` in a popover, restoring the last
-visited URL on launch. Product name: MenubarBrowser (target), bundle id `com.yutaehun.MenubarBrowser`.
+바브라우저 (Bar Browser) is a macOS menu bar mini web browser built with SwiftUI + WebKit. It lives entirely in the menu bar (no Dock icon, `LSUIElement = YES`) and shows a `WKWebView` in a popover, restoring the last visited URL on launch.
+Product name: MenubarBrowser (target), bundle id `com.yutaehun.MenubarBrowser`.
 
 ## Build / run / lint
 
@@ -28,24 +27,40 @@ settings in **both** the Debug and Release configurations, not by editing `Info.
 
 Key runtime pieces, all in `MenubarBrowser/`:
 
-- **MenubarBrowserApp.swift** — `@main` entry point. Declares three scenes: the `MenuBarExtra` (the actual
-  app UI, styled `.window`), an "About" `Window("about_window")`, and a "Settings" `Window("settings_window")`.
-  Also sets up a SwiftData `ModelContainer` for `Item` (currently unused by app logic — scaffold leftover).
-  Forces `NSApp.setActivationPolicy(.accessory)` on popover appear / about-window disappear to keep the app
-  out of the Dock except when a secondary window is focused.
-- **PopoverView.swift** — the menu bar popover content: back button, URL text field, gear `Menu` (About /
-  Quit — a "환경설정"/Settings menu item exists but is commented out), and the `WebView`. Uses
-  `NotificationCenter` (not bindings/state) to communicate with the single shared `WKWebView`: `.goBack` and
-  `.loadURL` notifications are posted here and observed by both this view and `WebView`.
+- **AppDelegate.swift** — owns the menu bar presence directly via `NSStatusItem` + `NSPopover` (not SwiftUI's
+  `MenuBarExtra`), because `MenuBarExtra` has no public API to open/close its dropdown programmatically. This
+  is what lets the global keyboard shortcut (⌃⌥⌘B, Carbon `RegisterEventHotKey`) toggle the popover. Also
+  observes `UserDefaults.didChangeNotification` to re-register/unregister the hotkey when the "단축키" toggle
+  in Settings flips (backed by `@AppStorage("shortcutEnabled")`), and listens for `.closePopover` (posted by
+  `PopoverView` before opening the About/Settings windows) to close the popover via the public `NSPopover`
+  API rather than reaching into `NSApp.keyWindow`.
+- **MenubarBrowserApp.swift** — `@main` entry point. Wires `AppDelegate` in via
+  `@NSApplicationDelegateAdaptor`. Declares only the "About" `Window("about_window")` and "Settings"
+  `Window("settings_window")` scenes — the menu bar icon/popover is NOT a scene here, it's created in
+  `AppDelegate.applicationDidFinishLaunching`. Also sets up a SwiftData `ModelContainer` for `Item` (currently
+  unused by app logic — scaffold leftover). Forces `NSApp.setActivationPolicy(.accessory)` on
+  about/settings-window disappear to keep the app out of the Dock except when a secondary window is focused.
+  Note: `.defaultLaunchBehavior(.suppressed)` (macOS 15+) is NOT available at this project's 14.6 deployment
+  target — don't add it without an `#available` guard; verified empirically that these `Window` scenes don't
+  auto-open at launch on macOS 14 without it.
+- **PopoverView.swift** — the menu bar popover content: back button, URL text field, gear `Menu` (설정 / 바브
+  라우저에 관하여 / 종료), and the `WebView`. Uses `NotificationCenter` (not bindings/state) to communicate
+  with both the single shared `WKWebView` and the `AppDelegate`: `.goBack` / `.loadURL` are posted here and
+  observed by `WebView`; `.closePopover` is posted here and observed by `AppDelegate` before opening the
+  About/Settings windows.
 - **WebView.swift** — `NSViewRepresentable` wrapping `WKWebView`. `WebViewHolder.shared` holds a singleton
   reference to the live `WKWebView` instance so other views (menu actions, notification handlers) can drive
   it without prop drilling. Sets a custom mobile Safari user-agent so sites render their mobile layout in the
   small popover. Persists/restores the last-loaded URL via `UserDefaults` key `"lastURL"` in the
   `WKNavigationDelegate` callback.
-- **SettingsPopMenu.swift** — settings window UI (shortcut toggle, launch-at-login toggle). Currently UI-only:
-  the `@State` toggles are not wired to `UserDefaults`, a real global shortcut, or `SMAppService` — and the
-  menu entry that opens this window is commented out in `PopoverView.swift`. Treat as work-in-progress when
-  asked to make settings functional.
+- **SettingsPopMenu.swift** — settings window UI. "단축키" toggle is `@AppStorage("shortcutEnabled")`, which
+  `AppDelegate` observes to register/unregister the global hotkey. "로그인시 실행" toggle drives
+  `SMAppService.mainApp.register()/.unregister()`, re-synced from `SMAppService.mainApp.status` on
+  `.onAppear` (in case the user removed it via System Settings → Login Items directly) and shows a small red
+  error label if registration throws. Known SwiftUI layout gotcha: the shortcut keycap `HStack` (Image +
+  Image + Image + Text nested a few levels inside `.cornerRadius`/`.overlay`) needs `.fixedSize()` right after
+  the `.overlay`, or the trailing `Text("B")` silently gets clipped to zero width — confirmed by offscreen
+  `ImageRenderer` reproduction, not obvious from reading the view code alone.
 - **AboutAppMenu.swift** — About window; reads `CFBundleShortVersionString`/`CFBundleVersion` from
   `Bundle.main.infoDictionary` so version text stays in sync with the build settings automatically.
 - **Item.swift** — SwiftData `@Model` scaffold from the default Xcode template; not currently used elsewhere.
