@@ -26,6 +26,20 @@ extension Notification.Name {
     static let openSettingsWindow = Notification.Name("openSettingsWindow")
 }
 
+// 설정 화면의 "화면모드"(다크/라이트/시스템 설정) 값. UserDefaults 키 "appearanceMode"에
+// 문자열로 저장되며, SettingsPopMenu의 세그먼트 Picker와 태그 문자열을 공유한다.
+enum AppearanceMode: String, Equatable {
+    case dark, light, system
+
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .dark: return NSAppearance(named: .darkAqua)
+        case .light: return NSAppearance(named: .aqua)
+        case .system: return nil // nil이면 시스템 설정을 그대로 따라간다
+        }
+    }
+}
+
 // 화면(visibleFrame) 크기를 기준으로 한 팝오버 min/시작 크기. max 제약은 없음.
 // 세로가 기준값이고, 가로는 항상 세로에서 파생된다.
 enum PopoverSizing {
@@ -55,6 +69,11 @@ private final class PopoverWindow: NSWindow {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
+        // .normal 레벨 + canJoinAllSpaces 조합은 애플 문서상 보조 패널류에만 쓰라고 되어
+        // 있는 조합이라(일반 창에 쓰면 스페이스별로 동작이 들쭉날쭉해질 수 있음) 실제로도
+        // 미션 컨트롤 화면마다 다르게 동작하고 팝오버를 닫기만 해도 재생이 멈추는 등 오히려
+        // 더 불안정해져서 되돌린다. .popUpMenu가 "바깥 클릭으로 닫기" 시나리오에서는
+        // 확실히 동작했던 원래 설정.
         level = .popUpMenu
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         isMovable = false
@@ -81,14 +100,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyRef: EventHotKeyRef?
     private var hotKeyHandler: EventHandlerRef?
     private var shortcutEnabled = true
+    private var appearanceMode: AppearanceMode = .system
 
     private static let hotKeyID = EventHotKeyID(signature: fourCharCode("BarB"), id: 1)
+    private static let appearanceModeKey = "appearanceMode"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        UserDefaults.standard.register(defaults: ["shortcutEnabled": true])
+        UserDefaults.standard.register(defaults: [
+            "shortcutEnabled": true,
+            Self.appearanceModeKey: AppearanceMode.system.rawValue
+        ])
         shortcutEnabled = UserDefaults.standard.bool(forKey: "shortcutEnabled")
+        appearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: Self.appearanceModeKey) ?? "") ?? .system
+        NSApp.appearance = appearanceMode.nsAppearance
 
         setupStatusItem()
         setupPopoverWindow()
@@ -340,13 +366,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Settings sync
 
     @objc private func handleDefaultsChanged() {
-        let newValue = UserDefaults.standard.bool(forKey: "shortcutEnabled")
-        guard newValue != shortcutEnabled else { return }
-        shortcutEnabled = newValue
-        if newValue {
-            registerGlobalHotKey()
-        } else {
-            unregisterGlobalHotKey()
+        let newShortcutEnabled = UserDefaults.standard.bool(forKey: "shortcutEnabled")
+        if newShortcutEnabled != shortcutEnabled {
+            shortcutEnabled = newShortcutEnabled
+            if newShortcutEnabled {
+                registerGlobalHotKey()
+            } else {
+                unregisterGlobalHotKey()
+            }
+        }
+
+        let newAppearanceMode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: Self.appearanceModeKey) ?? "") ?? .system
+        if newAppearanceMode != appearanceMode {
+            appearanceMode = newAppearanceMode
+            NSApp.appearance = appearanceMode.nsAppearance
         }
     }
 

@@ -10,6 +10,7 @@ import ServiceManagement
 
 struct SettingsPopMenu: View {
     @AppStorage("shortcutEnabled") private var shortcutAction = true
+    @AppStorage("appearanceMode") private var appearanceMode = "system"
     @State private var launchAtLogin = false
     @State private var launchAtLoginError: String?
 
@@ -20,6 +21,8 @@ struct SettingsPopMenu: View {
                 Divider().padding(.horizontal, 20)
                 launchAtLoginRow
                 resetSizeRow
+                Divider().padding(.horizontal, 20)
+                appearanceRow
             }
             .background(Color(NSColor.windowBackgroundColor).opacity(0.5))
             .cornerRadius(10)
@@ -30,6 +33,10 @@ struct SettingsPopMenu: View {
             .padding(.horizontal, 20)
         }
         .frame(width: 300) // 스크린샷에 맞춰 너비 고정
+        .padding(.vertical, 10)
+        // NSHostingController가 창 생성 시점에 높이를 잘못 추정해 아래가 잘리는 문제가 있어서,
+        // 콘텐츠의 실제 높이에 맞춰 세로 크기를 강제로 계산하게 한다.
+        .fixedSize(horizontal: false, vertical: true)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             // 시스템 설정(로그인 항목)에서 직접 끈 경우도 반영되도록 실제 상태를 다시 읽어옴
@@ -123,6 +130,30 @@ struct SettingsPopMenu: View {
                 NotificationCenter.default.post(name: .resetPopoverSize, object: nil)
             }
             .buttonStyle(.bordered)
+
+            Spacer().frame(width: 20)
+        }
+        .padding(.vertical, 15)
+    }
+
+    // 4. 화면 모드 (다크/라이트/시스템 설정)
+    private var appearanceRow: some View {
+        HStack {
+            Spacer().frame(width: 20)
+
+            Text("화면모드")
+                .frame(alignment: .trailing)
+
+            Spacer()
+
+            Picker("", selection: $appearanceMode) {
+                Text("다크").tag("dark")
+                Text("라이트").tag("light")
+                Text("시스템 설정").tag("system")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
 
             Spacer().frame(width: 20)
         }
