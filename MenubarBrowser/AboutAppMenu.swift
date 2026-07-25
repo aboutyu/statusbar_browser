@@ -7,12 +7,6 @@
 
 import SwiftUI
 
-//"바브라우저에 관하여" 창을 위한 깔끔한 레이아웃 코드를 짜드렸습니다. 특히 버전 정보를 앱 설정에서 자동으로 가져오는 로직을 포함해서, 나중에 앱스토어 설정을 바꾸면 자동으로 반영되도록 만들었습니다.
-//
-//✅ 수정된 AboutAppMenu.swift
-//Swift
-//import SwiftUI
-
 struct AboutAppMenu: View {
     // 📌 앱 프로젝트 설정(Info)에서 버전과 빌드 번호를 자동으로 가져오는 변수
     let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
