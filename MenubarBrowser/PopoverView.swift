@@ -11,9 +11,23 @@ internal import WebKit
 struct PopoverView: View {
     @State private var urlText = ""
     @State private var canGoBack = false
-    @Environment(\.openWindow) private var openWindow
+
+    private var minSize: NSSize {
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        return PopoverSizing.minSize(forScreen: screenFrame)
+    }
 
     var body: some View {
+        content
+            .overlay(alignment: .trailing) {
+                ResizeStrip(axis: .horizontal)
+            }
+            .overlay(alignment: .bottom) {
+                ResizeStrip(axis: .vertical)
+            }
+    }
+
+    private var content: some View {
         VStack(spacing: 8) {
 
             HStack {
@@ -36,23 +50,11 @@ struct PopoverView: View {
                 
                 Menu {
                     Button("설정") {
-                        NotificationCenter.default.post(name: .closePopover, object: nil)
-
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            NSApp.setActivationPolicy(.regular)
-                            openWindow(id: "settings_window")
-                            NSApp.activate(ignoringOtherApps: true)
-                        }
+                        NotificationCenter.default.post(name: .openSettingsWindow, object: nil)
                     }
 
                     Button("바브라우저에 관하여") {
-                        NotificationCenter.default.post(name: .closePopover, object: nil)
-
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            NSApp.setActivationPolicy(.regular)
-                            openWindow(id: "about_window")
-                            NSApp.activate(ignoringOtherApps: true)
-                        }
+                        NotificationCenter.default.post(name: .openAboutWindow, object: nil)
                     }
 
                     Divider()
@@ -86,7 +88,7 @@ struct PopoverView: View {
                 )
         }
         .padding(.top, 10)
-        .frame(minWidth: 450, minHeight: 600)
+        .frame(minWidth: minSize.width, minHeight: minSize.height)
         .onReceive(NotificationCenter.default.publisher(for: .goBack)) { _ in
             WebViewHolder.shared.webView?.goBack()
         }
@@ -110,6 +112,51 @@ struct PopoverView: View {
 
     private func removeFocus() {
         NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+}
+
+// 📐 오른쪽 가장자리(가로)/아래쪽 가장자리(세로)를 드래그해 한 축만 조절하는 핸들.
+// 모서리 대각선 드래그는 지원하지 않음 (min/max는 AppDelegate가 clamp)
+private struct ResizeStrip: View {
+    enum Axis { case horizontal, vertical }
+
+    let axis: Axis
+    @State private var lastTranslation: CGSize = .zero
+
+    private var cursor: NSCursor {
+        axis == .horizontal ? .resizeLeftRight : .resizeUpDown
+    }
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: axis == .horizontal ? 6 : nil,
+                   height: axis == .vertical ? 6 : nil)
+            .frame(maxWidth: axis == .vertical ? .infinity : nil,
+                   maxHeight: axis == .horizontal ? .infinity : nil)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        cursor.set() // 빠르게 드래그하면 hover 영역을 벗어나는 순간이 있어 매 프레임 다시 세팅
+                        let step: CGSize
+                        switch axis {
+                        case .horizontal:
+                            step = CGSize(width: value.translation.width - lastTranslation.width, height: 0)
+                        case .vertical:
+                            step = CGSize(width: 0, height: value.translation.height - lastTranslation.height)
+                        }
+                        lastTranslation = value.translation
+                        NotificationCenter.default.post(name: .resizePopoverBy, object: step)
+                    }
+                    .onEnded { _ in
+                        lastTranslation = .zero
+                        NotificationCenter.default.post(name: .resizePopoverDragEnded, object: nil)
+                    }
+            )
+            .onHover { hovering in
+                (hovering ? cursor : NSCursor.arrow).set()
+            }
     }
 }
 

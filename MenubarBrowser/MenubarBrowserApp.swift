@@ -26,31 +26,13 @@ struct MenubarBrowserApp: App {
     }()
 
     var body: some Scene {
-        // 메뉴바 아이콘과 팝오버는 AppDelegate가 NSStatusItem/NSPopover로 직접 관리한다.
-        // (전역 단축키로 팝오버를 여닫으려면 MenuBarExtra에는 없는 프로그래밍적 제어가 필요하기 때문)
-
-        // 바브라우저에 관하여
-        Window("바브라우저에 관하여", id: "about_window") {
-            AboutAppMenu()
-                .frame(minWidth: 300, minHeight: 280)
-                .onDisappear {
-                    NSApp.setActivationPolicy(.accessory)
-                }
+        // 메뉴바 아이콘/팝오버뿐 아니라 About/설정 창도 전부 AppDelegate가 AppKit(NSStatusItem/
+        // NSPopover/NSWindow)으로 직접 관리한다. SwiftUI Window scene은 macOS 14에서 launch
+        // 시점에 자동으로 표시될 수 있어(제어 불가) 의도적으로 쓰지 않는다.
+        // Settings 씬은 앱이 항상 최소 1개의 Scene을 가져야 하는 SwiftUI 요구사항을 채우기 위한
+        // 빈 자리표시자일 뿐이며, Settings scene은 launch 시 자동으로 열리지 않는다.
+        Settings {
+            EmptyView()
         }
-        .windowResizability(.contentSize)
-        .windowStyle(.automatic)
-        .defaultSize(width: 300, height: 150)
-
-        // 환경설정
-        Window("환경설정", id: "settings_window") {
-            SettingsPopMenu()
-                .frame(minWidth: 300, minHeight: 150)
-                .onDisappear {
-                    NSApp.setActivationPolicy(.accessory)
-                }
-        }
-        .windowResizability(.contentSize)
-        .windowStyle(.automatic)
-        .defaultSize(width: 300, height: 150)
     }
 }
