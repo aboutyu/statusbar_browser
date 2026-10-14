@@ -17,6 +17,7 @@
 import AppKit
 import SwiftUI
 import Carbon.HIToolbox
+internal import WebKit
 
 extension Notification.Name {
     static let resizePopoverBy = Notification.Name("resizePopoverBy")
@@ -49,9 +50,10 @@ enum PopoverSizing {
     }
 
     static func initialSize(forScreen screenFrame: NSRect) -> NSSize {
-        let height = screenFrame.height / 2
-        let width = height / 2
-        return NSSize(width: width, height: height)
+        // 최초 실행 시 기본 크기: 가로는 기존 기준값의 1.5배, 세로는 2배.
+        let baseHeight = screenFrame.height / 2
+        let baseWidth = baseHeight / 2
+        return NSSize(width: baseWidth * 1.5, height: baseHeight * 2)
     }
 }
 
@@ -72,10 +74,20 @@ private final class PopoverWindow: NSWindow {
         // .normal 레벨 + canJoinAllSpaces 조합은 애플 문서상 보조 패널류에만 쓰라고 되어
         // 있는 조합이라(일반 창에 쓰면 스페이스별로 동작이 들쭉날쭉해질 수 있음) 실제로도
         // 미션 컨트롤 화면마다 다르게 동작하고 팝오버를 닫기만 해도 재생이 멈추는 등 오히려
-        // 더 불안정해져서 되돌린다. .popUpMenu가 "바깥 클릭으로 닫기" 시나리오에서는
-        // 확실히 동작했던 원래 설정.
-        level = .popUpMenu
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        // 더 불안정해져서 시도했었다.
+        // .popUpMenu 레벨도 마찬가지로 문제였다: macOS는 .popUpMenu 레벨 창을 "진짜 팝업
+        // 메뉴"로 취급해서, Space를 전환(트랙패드 스와이프/Mission Control)하는 동안 이 창을
+        // canJoinAllSpaces와 무관하게 강제로 닫으려는 듯한 동작을 한다 — 숨겨놓은(alpha 0)
+        // 상태에서도 오디오가 끊기고, 전환 애니메이션 중 창이 잠깐 보였다 사라지는 깜빡임까지
+        // 발생했다. .statusBar 레벨은 실제 메뉴바/상태바류 UI가 쓰는 레벨로, canJoinAllSpaces와
+        // 함께 쓰는 것이 애플 문서상으로도 지원되는 조합이라 이걸로 바꾼다. 바깥 클릭으로
+        // 닫는 동작은 window level이 아니라 startOutsideInteractionMonitors()의 전역
+        // NSEvent 모니터로 직접 구현되어 있어서, 레벨을 바꿔도 영향받지 않는다.
+        level = .statusBar
+        // .stationary: Exposé/Spaces 전환 시 다른 공간으로 "옮겨지는" 창이 아니라 항상 제자리에
+        // 고정된 창으로 취급되도록 한다. canJoinAllSpaces + stationary는 애플이 패널류 창에
+        // 공식적으로 지원한다고 밝힌 조합이다.
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
         isMovable = false
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
@@ -84,6 +96,27 @@ private final class PopoverWindow: NSWindow {
     // borderless 창은 기본적으로 key window가 되지 못해 URL 입력창 등이 포커스를 못 받는다.
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    // 웹페이지가 처리하지 않은 Esc만 여기까지 올라온다(WKWebView는 처리 안 된 키 이벤트를
+    // responder chain으로 다시 흘려보냄). 페이지가 Esc를 쓰는 경우(모달 닫기 등)를 막지 않고
+    // 남는 Esc로만 팝오버를 닫기 위해 로컬 모니터 대신 여기서 처리한다.
+    var onEscape: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == UInt16(kVK_Escape), let onEscape {
+            onEscape()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if let onEscape {
+            onEscape()
+        } else {
+            super.cancelOperation(sender)
+        }
+    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -91,6 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popoverWindow = PopoverWindow()
     private var outsideClickMonitor: Any?
     private var escKeyMonitor: Any?
+    // 팝오버를 열기 직전에 활성 상태였던 앱. Esc/단축키/아이콘 클릭으로 닫을 때 포커스를
+    // 이 앱에 돌려줘야, 숨겨진(alpha 0) 팝오버 창이 계속 key window로 남아 키 입력을
+    // 가로채는 일이 없다.
+    private var previousActiveApp: NSRunningApplication?
 
     // About/설정 창은 SwiftUI Window scene(자동 복원/자동 오픈 위험이 있음) 대신
     // 팝오버와 동일하게 AppKit에서 직접 열고 닫는다 — 메뉴 클릭 시에만 생성/표시된다.
@@ -147,6 +184,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(handleOpenSettings),
             name: .openSettingsWindow, object: nil
         )
+        // ⌘Tab 등 키보드로 다른 앱에 넘어가면 바깥 클릭 모니터가 발동하지 않으므로,
+        // 앱이 비활성화되는 시점에도 팝오버를 닫는다.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleAppResignActive),
+            name: NSApplication.didResignActiveNotification, object: nil
+        )
+        // 모니터 연결/해제, 해상도 변경 시 숨겨둔 창이 다른 화면 위에 걸리지 않게 다시 치운다.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleScreenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleOcclusionChange),
+            name: NSWindow.didChangeOcclusionStateNotification, object: popoverWindow
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -186,12 +238,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             baseSize = PopoverSizing.initialSize(forScreen: screenFrame)
         }
 
-        popoverWindow.setContentSize(clampedSize(baseSize))
-        popoverWindow.contentViewController = NSHostingController(
+        let hostingController = NSHostingController(
             rootView: PopoverView()
                 .background(Color(NSColor.windowBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         )
+        // 창 크기(min/max 포함)는 전부 AppDelegate가 clampedSize로 관리한다. SwiftUI가 별도
+        // 기준으로 창 크기 제약을 덧씌우지 않게 한다.
+        hostingController.sizingOptions = []
+        popoverWindow.contentViewController = hostingController
+        popoverWindow.setContentSize(clampedSize(baseSize))
+        popoverWindow.onEscape = { [weak self] in
+            self?.hidePopoverWindow(restoreFocus: true)
+        }
 
         // orderOut()은 occlusion state를 "안 보임"으로 바꿔서 WKWebView가 재생 중이던
         // 미디어를 스스로 멈춰버린다(occlusion 변화 = WebKit이 페이지를 백그라운드로 인식).
@@ -199,7 +258,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ignoresMouseEvents로 "안 보이고 클릭도 안 되는" 상태만 흉내낸다.
         popoverWindow.alphaValue = 0
         popoverWindow.ignoresMouseEvents = true
+        parkHiddenPopoverWindow()
         popoverWindow.orderFrontRegardless()
+    }
+
+    // Space 전환(세 손가락 스와이프/Mission Control) 애니메이션은 창의 alphaValue를 무시하고
+    // 그려서, alpha 0으로 숨겨둔 팝오버가 전환할 때마다 잠깐 나타났다 사라진다(레벨과 무관).
+    // 그래서 숨김 상태에서는 창을 화면 바깥으로 치워두되, occlusion이 "안 보임"으로 바뀌어
+    // 미디어가 멈추지 않도록 모서리 1pt만 화면에 걸쳐둔다. 크기는 그대로라 웹페이지 레이아웃도
+    // 바뀌지 않는다. 다음에 열 때 positionPopoverWindow가 원래 자리로 되돌린다.
+    private func parkHiddenPopoverWindow() {
+        guard let screen = statusItem?.button?.window?.screen ?? NSScreen.main else { return }
+        let size = popoverWindow.frame.size
+        let screenFrame = screen.frame
+        let sliver: CGFloat = 1
+        let candidates = [
+            NSPoint(x: screenFrame.minX - size.width + sliver, y: screenFrame.minY - size.height + sliver), // 왼쪽 아래
+            NSPoint(x: screenFrame.maxX - sliver, y: screenFrame.minY - size.height + sliver),              // 오른쪽 아래
+            NSPoint(x: screenFrame.minX - size.width + sliver, y: screenFrame.maxY - sliver),               // 왼쪽 위
+            NSPoint(x: screenFrame.maxX - sliver, y: screenFrame.maxY - sliver)                             // 오른쪽 위
+        ]
+        // 바깥으로 밀어낸 부분이 옆에 붙은 다른 모니터 위에 놓이면 거기서 다시 깜빡이므로 피한다.
+        let origin = candidates.first { origin in
+            let rect = NSRect(origin: origin, size: size)
+            return NSScreen.screens.allSatisfy { $0 == screen || !$0.frame.intersects(rect) }
+        } ?? candidates[0]
+        popoverWindow.setFrameOrigin(origin)
+    }
+
+    @objc private func handleScreenParametersChanged() {
+        if !isPopoverVisible {
+            parkHiddenPopoverWindow()
+        }
     }
 
     private var isPopoverVisible: Bool { popoverWindow.alphaValue > 0 }
@@ -207,8 +297,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func togglePopover(_ sender: Any?) {
         guard let button = statusItem?.button else { return }
         if isPopoverVisible {
-            hidePopoverWindow()
+            hidePopoverWindow(restoreFocus: true)
         } else {
+            let frontmost = NSWorkspace.shared.frontmostApplication
+            previousActiveApp = frontmost == NSRunningApplication.current ? nil : frontmost
+
             positionPopoverWindow(relativeTo: button)
             NSApp.activate(ignoringOtherApps: true)
             popoverWindow.ignoresMouseEvents = false
@@ -218,10 +311,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func hidePopoverWindow() {
+    // restoreFocus: 우리 앱이 여전히 활성 상태로 남는 닫기(Esc/단축키/아이콘 클릭)에서는 true.
+    // 바깥 클릭이나 앱 비활성화로 닫힐 때는 이미 다른 앱이 포커스를 가져가고 있으므로 false —
+    // 여기서 이전 앱을 활성화하면 사용자가 방금 클릭한 앱과 포커스를 다투게 된다.
+    private func hidePopoverWindow(restoreFocus: Bool = false) {
+        guard isPopoverVisible else { return }
         popoverWindow.alphaValue = 0
         popoverWindow.ignoresMouseEvents = true
         stopOutsideInteractionMonitors()
+        popoverWindow.makeFirstResponder(nil)
+        parkHiddenPopoverWindow()
+
+        guard restoreFocus, NSApp.isActive else { return }
+        // orderOut()/NSApp.hide()는 창을 화면에서 내려 미디어 재생을 멈추므로 쓰지 않고,
+        // key 상태만 다른 곳으로 넘긴다.
+        if let auxWindow = [settingsWindow, aboutWindow].compactMap({ $0 }).first(where: { $0.isVisible }) {
+            auxWindow.makeKeyAndOrderFront(nil)
+        } else if let previousActiveApp, !previousActiveApp.isTerminated {
+            previousActiveApp.activate()
+        } else {
+            NSApp.deactivate()
+        }
+        previousActiveApp = nil
+    }
+
+    @objc private func handleAppResignActive() {
+        hidePopoverWindow()
     }
 
     // 메뉴바 아이콘 기준으로 팝오버가 놓일 화면 좌표(가로 중앙 정렬, 화면 밖으로 안 나가게 clamp).
@@ -230,14 +345,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let buttonFrameOnScreen = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
         let screenFrame = buttonWindow.screen?.visibleFrame ?? currentScreenFrame()
 
-        let x = min(max(buttonFrameOnScreen.midX - size.width / 2, screenFrame.minX), screenFrame.maxX - size.width)
+        let x = max(min(buttonFrameOnScreen.midX - size.width / 2, screenFrame.maxX - size.width), screenFrame.minX)
         let y = buttonFrameOnScreen.minY - size.height
         return NSRect(x: x, y: y, width: size.width, height: size.height)
     }
 
     private func positionPopoverWindow(relativeTo button: NSStatusBarButton) {
-        guard let frame = popoverFrame(size: popoverWindow.frame.size, relativeTo: button) else { return }
-        popoverWindow.setFrameOrigin(frame.origin)
+        // 다른(더 작은) 모니터에서 열리거나 해상도가 바뀌었을 수 있으니 현재 화면 기준으로 다시 clamp한다.
+        guard let frame = popoverFrame(size: clampedSize(popoverWindow.frame.size), relativeTo: button) else { return }
+        popoverWindow.setFrame(frame, display: false)
     }
 
     // 바깥 클릭/Esc로 팝오버를 닫는 동작(기존 NSPopover.behavior = .transient를 대체)
@@ -246,11 +362,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.hidePopoverWindow()
         }
+        // 웹페이지에 포커스가 있을 때의 Esc는 페이지에 먼저 넘기고(처리되지 않으면
+        // PopoverWindow.keyDown에서 닫힘), URL 입력창 등 그 외의 경우에만 여기서 바로 닫는다.
         escKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.keyCode == 53 else { return event } // esc
-            self?.hidePopoverWindow()
+            guard let self,
+                  event.keyCode == UInt16(kVK_Escape),
+                  event.window === self.popoverWindow else { return event }
+            if self.isWebViewFocused {
+                return event
+            }
+            self.hidePopoverWindow(restoreFocus: true)
             return nil
         }
+    }
+
+    private var isWebViewFocused: Bool {
+        var view = popoverWindow.firstResponder as? NSView
+        while let current = view {
+            if current is WKWebView { return true }
+            view = current.superview
+        }
+        return false
     }
 
     private func stopOutsideInteractionMonitors() {
@@ -292,7 +424,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 크기뿐 아니라 메뉴바 아이콘 기준 위치도 다시 맞춰야 "초기화"답게 보인다.
         // (가로 리사이즈 핸들이 왼쪽을 고정하고 자라기 때문에, 여러 번 늘렸다 줄이면
         // 아이콘 중앙에서 한쪽으로 치우친 채로 크기만 바뀌어 어색해 보일 수 있었음)
-        if let button = statusItem?.button, let frame = popoverFrame(size: defaultSize, relativeTo: button) {
+        if !isPopoverVisible {
+            // 설정 창에서 누르는 경우 팝오버는 숨겨진 상태 — 크기만 바꾸고 계속 화면 밖에 둔다.
+            // (위치는 다음에 열 때 positionPopoverWindow가 아이콘 기준으로 맞춘다)
+            popoverWindow.setContentSize(defaultSize)
+            parkHiddenPopoverWindow()
+        } else if let button = statusItem?.button, let frame = popoverFrame(size: defaultSize, relativeTo: button) {
             popoverWindow.setFrame(frame, display: true, animate: true)
         } else {
             setPopoverWindowSize(defaultSize, animate: true)
@@ -316,15 +453,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(Double(size.height), forKey: Self.lastHeightKey)
     }
 
+    // min은 화면 기준 비율, max는 화면(메뉴바 아래 visibleFrame) 크기 — 창이 화면 밖으로
+    // 나가서 아래쪽 리사이즈 핸들에 손이 닿지 않게 되는 일을 막는다.
     private func clampedSize(_ proposed: NSSize) -> NSSize {
-        let minSize = PopoverSizing.minSize(forScreen: currentScreenFrame())
-        return NSSize(width: max(proposed.width, minSize.width), height: max(proposed.height, minSize.height))
+        let screenFrame = currentScreenFrame()
+        let minSize = PopoverSizing.minSize(forScreen: screenFrame)
+        let maxSize = NSSize(width: max(screenFrame.width, minSize.width), height: max(screenFrame.height, minSize.height))
+        return NSSize(
+            width: min(max(proposed.width, minSize.width), maxSize.width),
+            height: min(max(proposed.height, minSize.height), maxSize.height)
+        )
     }
 
     // MARK: - About / Settings windows
 
     @objc private func handleOpenAbout() {
-        closePopoverIfShown()
+        hidePopoverWindow()
         if aboutWindow == nil {
             aboutWindow = makeUtilityWindow(title: "바브라우저에 관하여", rootView: AboutAppMenu())
         }
@@ -332,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleOpenSettings() {
-        closePopoverIfShown()
+        hidePopoverWindow()
         if settingsWindow == nil {
             settingsWindow = makeUtilityWindow(title: "환경설정", rootView: SettingsPopMenu())
         }
@@ -357,10 +501,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func closePopoverIfShown() {
-        if isPopoverVisible {
-            hidePopoverWindow()
-        }
+    // Space 스와이프 등으로 창이 잠깐 가려졌다가 다시 보이게 될 때 호출된다. 그 사이 WebKit이
+    // 재생 중이던 미디어를 스스로 멈췄을 수 있어 .resumeMediaIfNeeded를 post해 WebView가
+    // 재생 의도가 있던 <video>/<audio>를 다시 play()하도록 한다.
+    @objc private func handleOcclusionChange() {
+        guard isPopoverVisible, popoverWindow.occlusionState.contains(.visible) else { return }
+        NotificationCenter.default.post(name: .resumeMediaIfNeeded, object: nil)
     }
 
     // MARK: - Settings sync
@@ -388,6 +534,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func registerGlobalHotKey() {
         guard hotKeyRef == nil else { return }
 
+        if hotKeyHandler == nil {
+            installHotKeyHandler()
+        }
+
+        let modifiers = UInt32(controlKey | optionKey | cmdKey)
+        let status = RegisterEventHotKey(
+            UInt32(kVK_ANSI_B),
+            modifiers,
+            AppDelegate.hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKeyRef
+        )
+        if status != noErr {
+            // 다른 앱이 같은 조합을 이미 쓰는 경우 등. 핸들러만 남겨두지 않도록 정리한다.
+            NSLog("[BarBrowser] 전역 단축키 등록 실패: \(status)")
+            unregisterGlobalHotKey()
+        }
+    }
+
+    private func installHotKeyHandler() {
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: OSType(kEventHotKeyPressed)
@@ -422,16 +589,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             &eventType,
             Unmanaged.passUnretained(self).toOpaque(),
             &hotKeyHandler
-        )
-
-        let modifiers = UInt32(controlKey | optionKey | cmdKey)
-        RegisterEventHotKey(
-            UInt32(kVK_ANSI_B),
-            modifiers,
-            AppDelegate.hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRef
         )
     }
 
