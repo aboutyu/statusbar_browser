@@ -21,7 +21,7 @@
 - 현재 정의된 테스트 타깃은 없습니다.
 - 배포 타깃: macOS 14.6(타깃 빌드 설정 기준). 프로젝트 레벨 설정은 15.7로 되어 있지만, 앱에는 타깃 레벨
   값이 우선 적용됩니다.
-- 현재 버전: `MARKETING_VERSION = 1.0.1`, `CURRENT_PROJECT_VERSION = 6` (`project.pbxproj`의 타깃 빌드
+- 현재 버전: `MARKETING_VERSION = 1.0.2`, `CURRENT_PROJECT_VERSION = 6` (`project.pbxproj`의 타깃 빌드
   설정 참고).
 
 ## 아키텍처
