@@ -58,6 +58,37 @@ private let pageVisibilityScriptSource = """
 })();
 """
 
+// 🔈 모바일 유튜브(아이폰 UA)는 영상을 불러올 때마다 플레이어가 스스로 video.muted = true를 설정한다
+// (iOS 사파리의 "소리 있는 자동재생 금지"를 가정한 음소거 자동재생). macOS WKWebView는 소리 있는 자동재생을
+// 막지 않으므로, 사용자가 직접 누르지 않은(=user activation이 없는) 음소거 요청은 무시해 영상이 바뀌어도
+// 소리가 유지되게 한다. 사용자가 음소거 버튼을 직접 눌렀다면 그 뒤의 음소거는 존중한다.
+// 다른 사이트의 배경 영상/광고가 소리를 내지 않도록 유튜브 도메인에만 적용한다.
+private let youTubeAutoMuteGuardScriptSource = """
+(function() {
+    if (!/(^|\\.)(youtube\\.com|youtube-nocookie\\.com)$/.test(location.hostname)) { return; }
+    if (window.__barBrowserMuteGuardInstalled) { return; }
+    window.__barBrowserMuteGuardInstalled = true;
+
+    var descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
+    if (!descriptor || !descriptor.set) { return; }
+    var userWantsMuted = false;
+
+    Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
+        get: descriptor.get,
+        set: function(value) {
+            var byUser = !!(navigator.userActivation && navigator.userActivation.isActive);
+            if (byUser) {
+                userWantsMuted = !!value;
+            } else if (value && !userWantsMuted) {
+                return;
+            }
+            descriptor.set.call(this, value);
+        },
+        configurable: true
+    });
+})();
+"""
+
 // 🔊 Space 전환(트랙패드 스와이프)처럼 창이 잠깐 occluded 상태가 되는 동안 WebKit이 재생 중이던
 // 미디어를 스스로 멈추는 경우가 있어서, 페이지에 재생 의도(사용자가 최근에 play를 눌렀는지)를
 // 기록해두고 .resumeMediaIfNeeded 알림을 받으면 그 의도에 맞춰 다시 play()를 호출한다.
@@ -122,6 +153,11 @@ struct WebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: youTubeAutoMuteGuardScriptSource,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        ))
         configuration.userContentController.addUserScript(WKUserScript(
             source: pageVisibilityScriptSource,
             injectionTime: .atDocumentStart,
@@ -219,7 +255,7 @@ struct WebView: NSViewRepresentable {
             // 사용자가 다른 곳으로 이동해서 취소된 로드, 다운로드 등으로 정책상 중단된 로드는 오류가 아니다.
             if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
             if nsError.domain == "WebKitErrorDomain" && (nsError.code == 102 || nsError.code == 204) { return }
-            parent.loadError = "페이지를 열 수 없습니다: \(nsError.localizedDescription)"
+            parent.loadError = String(localized: "페이지를 열 수 없습니다: \(nsError.localizedDescription)")
         }
 
         // 장시간 백그라운드 재생 등으로 WebContent 프로세스가 죽으면 빈 화면으로 남으므로 다시 불러온다.
@@ -283,15 +319,15 @@ private enum WebPanels {
     static func alert(message: String, in window: NSWindow?, completionHandler: @escaping () -> Void) {
         let alert = NSAlert()
         alert.messageText = message
-        alert.addButton(withTitle: "확인")
+        alert.addButton(withTitle: String(localized: "확인"))
         present(alert, in: window) { _ in completionHandler() }
     }
 
     static func confirm(message: String, in window: NSWindow?, completionHandler: @escaping (Bool) -> Void) {
         let alert = NSAlert()
         alert.messageText = message
-        alert.addButton(withTitle: "확인")
-        alert.addButton(withTitle: "취소")
+        alert.addButton(withTitle: String(localized: "확인"))
+        alert.addButton(withTitle: String(localized: "취소"))
         present(alert, in: window) { completionHandler($0 == .alertFirstButtonReturn) }
     }
 
@@ -299,8 +335,8 @@ private enum WebPanels {
                        completionHandler: @escaping (String?) -> Void) {
         let alert = NSAlert()
         alert.messageText = prompt
-        alert.addButton(withTitle: "확인")
-        alert.addButton(withTitle: "취소")
+        alert.addButton(withTitle: String(localized: "확인"))
+        alert.addButton(withTitle: String(localized: "취소"))
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
         field.stringValue = defaultText ?? ""
         alert.accessoryView = field
@@ -364,7 +400,7 @@ final class PopupWebWindowController: NSObject, NSWindowDelegate, WKUIDelegate {
         window.level = .statusBar
         window.hidesOnDeactivate = true
         window.delegate = self
-        window.title = "바브라우저"
+        window.title = String(localized: "바브라우저")
         window.center()
 
         titleObservation = webView.observe(\.title, options: [.new]) { [weak self] webView, _ in

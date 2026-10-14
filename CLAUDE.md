@@ -67,6 +67,10 @@ Info.plist 항목을 추가할 때는 `Info.plist`를 직접 수정하지 말고
     이를 보고 재생을 멈춥니다 — 그래서 `WebView.swift`의 `pageVisibilityScriptSource`가 모든 프레임에서
     `document.hidden`/`visibilityState`를 항상 "보임"으로 덮어쓰고 `visibilitychange`를 차단합니다.
     "닫아도 계속 재생"은 창 위치/occlusion이 아니라 이 스크립트에 의존합니다.
+  - 모바일 유튜브 플레이어는 영상을 불러올 때마다 스스로 `video.muted = true`를 설정합니다(iOS의 소리 있는
+    자동재생 금지를 가정). `WebView.swift`의 `youTubeAutoMuteGuardScriptSource`가 유튜브 도메인에서만
+    user activation 없는 음소거 요청을 무시합니다(사용자가 직접 음소거한 경우는 유지). WKWebView 자동재생
+    정책(`mediaTypesRequiringUserActionForPlayback`)은 macOS 기본값이 이미 제한 없음이라 원인이 아닙니다.
   - `canBecomeKey`를 `true`로 오버라이드했는데(borderless 창은 기본적으로 key window가 될 수 없음),
     URL 입력창이 키보드 포커스를 받으려면 필요합니다.
   - AppDelegate는 **크기 조절 기능**도 담당합니다. `PopoverView`의 `ResizeStrip`이 드래그 중에는
@@ -129,6 +133,19 @@ Info.plist 항목을 추가할 때는 `Info.plist`를 직접 수정하지 말고
   `CFBundleShortVersionString`/`CFBundleVersion`을 읽어와서 버전 텍스트가 빌드 설정과 자동으로 동기화되게
   합니다.
 
+
+## 다국어
+
+지원 언어: 영어(en, 개발 언어 겸 미지원 언어의 기본값), 한국어(ko), 일본어(ja). 번역은
+`MenubarBrowser/Localizable.xcstrings`(String Catalog) 하나에 모여 있습니다.
+
+- **키는 코드에 쓰인 한국어 문자열 그대로**입니다(catalog의 `sourceLanguage`는 `en`이지만 영어 값도 명시적으로
+  번역해 둠). 그래서 한국어 문구를 바꾸면 키가 바뀌므로 catalog의 해당 항목도 함께 고쳐야 합니다.
+- SwiftUI `Text`/`Button`/`TextField`의 문자열 리터럴은 자동으로 로컬라이즈되지만, AppKit 창 제목·`NSAlert`
+  버튼·`String` 변수에 담는 오류 문구는 `String(localized:)`로 감싸야 합니다. 보간이 들어간 문구는 키가
+  `%@` 형태가 됩니다(예: `"설정 실패: %@"`).
+- 변수로 받은 문자열을 그대로 보여줄 때는 `Text(verbatim:)` 또는 `Text(someString)`(String 타입이면 번역 안 함).
+- 번역 문구는 한국어보다 길어질 수 있으니 고정 폭 레이아웃을 피하세요(설정 창 너비 360, About 창 라벨은 `Grid`).
 
 ## App Store 심사 관련 작업 노트
 

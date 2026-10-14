@@ -501,7 +501,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleOpenAbout() {
         hidePopoverWindow()
         if aboutWindow == nil {
-            aboutWindow = makeUtilityWindow(title: "바브라우저에 관하여", rootView: AboutAppMenu())
+            aboutWindow = makeUtilityWindow(title: String(localized: "바브라우저에 관하여"), rootView: AboutAppMenu())
         }
         present(aboutWindow)
     }
@@ -509,7 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleOpenSettings() {
         hidePopoverWindow()
         if settingsWindow == nil {
-            settingsWindow = makeUtilityWindow(title: "환경설정", rootView: SettingsPopMenu())
+            settingsWindow = makeUtilityWindow(title: String(localized: "환경설정"), rootView: SettingsPopMenu())
         }
         present(settingsWindow)
     }
