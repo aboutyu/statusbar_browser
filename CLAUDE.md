@@ -21,7 +21,7 @@
 - 현재 정의된 테스트 타깃은 없습니다.
 - 배포 타깃: macOS 14.6(타깃 빌드 설정 기준). 프로젝트 레벨 설정은 15.7로 되어 있지만, 앱에는 타깃 레벨
   값이 우선 적용됩니다.
-- 현재 버전: `MARKETING_VERSION = 1.0.2`, `CURRENT_PROJECT_VERSION = 6` (`project.pbxproj`의 타깃 빌드
+- 현재 버전: `MARKETING_VERSION = 1.0.3`, `CURRENT_PROJECT_VERSION = 6` (`project.pbxproj`의 타깃 빌드
   설정 참고).
 
 ## 아키텍처
@@ -46,12 +46,17 @@ Info.plist 항목을 추가할 때는 `Info.plist`를 직접 수정하지 말고
     오디오/영상(예: 유튜브)을 스스로 멈춥니다. 커스텀 `PopoverWindow`는 절대 `close()`하지 않고
     `orderOut()` 및 `alphaValue = 0` + `ignoresMouseEvents = true`로만 숨기기 때문에, 창(과 그 안의
     WKWebView)이 계속 살아있어 팝오버를 닫아도(=메뉴바 아이콘 밖 클릭) 미디어 재생이 끊기지 않습니다.
-  - `PopoverWindow`는 `.statusBar` 레벨에 `[.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle,
-    .stationary]` collection behavior로 떠 있습니다(`.popUpMenu`/`.normal` 레벨은 Space 전환 시 재생이
+  - `PopoverWindow`는 `.statusBar` 레벨에 떠 있습니다(`.popUpMenu`/`.normal` 레벨은 Space 전환 시 재생이
     끊기는 문제가 있었음 — 코드 주석 참고). 닫기 동작은 `NSPopover`의 transient-close 대신 직접 구현되어
-    있습니다: 바깥 클릭은 전역 `NSEvent` 모니터, ⌘Tab 등 키보드 전환은 `didResignActiveNotification`,
+    있습니다: 바깥 클릭은 전역 `NSEvent` 모니터, ⌘Tab 등 키보드 전환은 `didResignActiveNotification`
+    (Space 전환으로 인한 비활성화는 제외 — 0.4초 뒤 `isOnActiveSpace`로 판별),
     Esc는 로컬 모니터(URL 입력창 등) + `PopoverWindow.keyDown`/`cancelOperation`(웹페이지가 처리하지 않은
     Esc만 올라옴)으로 처리합니다.
+  - collection behavior는 상태에 따라 바뀝니다: 숨김 상태는 `hiddenCollectionBehavior`(`canJoinAllSpaces`
+    포함 — 어느 Space에서든 바로 열 수 있게), 열린 상태는 `shownCollectionBehavior`(`canJoinAllSpaces`
+    제외 — 연 Space에만 남음). 그래서 열어둔 채 스와이프하면 팝오버는 원래 Space에 그대로 있고, 다른
+    Space에서 아무 곳이나 클릭하면 전역 클릭 모니터가 닫습니다. 다른 Space에서 아이콘/단축키를 누르면
+    닫는 대신 현재 Space로 옮겨 엽니다.
   - 숨길 때 창은 key 상태로 남지 않아야 합니다: `hidePopoverWindow(restoreFocus: true)`(Esc/단축키/아이콘
     클릭)는 팝오버를 열기 전 활성 앱(`previousActiveApp`)으로 포커스를 돌려줍니다. 그러지 않으면 투명한
     팝오버 창의 WKWebView가 키 입력을 계속 받습니다(예: 유튜브 단축키 오작동). `orderOut()`/`NSApp.hide`는
