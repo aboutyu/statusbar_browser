@@ -28,9 +28,13 @@
 
 Debug/Release 두 개의 Xcode 빌드 구성이 `MenubarBrowser.xcodeproj/project.pbxproj`에 거의 동일한 설정으로
 존재합니다. `Info.plist`는 `INFOPLIST_KEY_*` 빌드 설정에서 자동 생성되며(`GENERATE_INFOPLIST_FILE = YES`)
-직접 편집하는 파일이 아닙니다 — 저장소에 커밋된 `Info.plist`는 거의 비어 있는 베이스 템플릿일 뿐입니다.
+직접 편집하는 파일이 아닙니다 — 저장소에 커밋된 `Info.plist`는 아래 ATS 설정만 담은 베이스 템플릿입니다.
 Info.plist 항목을 추가할 때는 `Info.plist`를 직접 수정하지 말고, Debug와 Release **양쪽 구성 모두에**
-`INFOPLIST_KEY_*` 빌드 설정으로 추가하세요. `MenubarBrowser.entitlements`는 현재 빈 dict로, 활성화된
+`INFOPLIST_KEY_*` 빌드 설정으로 추가하세요. 단, `INFOPLIST_KEY_*`로 표현할 수 없는 dict 형태의 키는 예외적으로
+`Info.plist`에 직접 둡니다(빌드 시 자동 생성 항목과 합쳐짐). 현재 그런 키는 `NSAppTransportSecurity`
+→ `NSAllowsArbitraryLoadsInWebContent = YES` 하나로, 웹브라우저라서 ATS가 WKWebView의 http 리소스(예: http
+이미지 CDN)를 막지 않도록 하기 위한 것입니다. App Store 심사에서 사용 사유를 물을 수 있습니다
+(사유: 사용자가 입력한 임의의 웹사이트를 여는 브라우저). `MenubarBrowser.entitlements`는 현재 빈 dict로, 활성화된
 샌드박스/권한(capability)이 없습니다.
 
 `MenubarBrowser/`에 있는 핵심 런타임 구성 요소:
