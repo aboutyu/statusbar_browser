@@ -40,7 +40,7 @@ struct SettingsPopMenu: View {
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             // 시스템 설정(로그인 항목)에서 직접 끈 경우도 반영되도록 실제 상태를 다시 읽어옴
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+            syncLaunchAtLoginFromSystem()
         }
     }
 
@@ -93,12 +93,16 @@ struct SettingsPopMenu: View {
 
                 Spacer()
 
-                Toggle("", isOn: $launchAtLogin)
+                // onChange 대신 커스텀 Binding으로 "사용자가 토글을 조작했을 때"만 등록/해제를 호출한다.
+                // onChange를 쓰면 실패 시 상태를 되돌리거나 onAppear에서 실제 상태를 반영하는
+                // 코드의 값 변경까지 다시 register/unregister를 호출해, 오류 문구가 곧바로 지워지거나
+                // 엉뚱한(unregister) 오류로 덮어써졌다.
+                Toggle("", isOn: Binding(
+                    get: { launchAtLogin },
+                    set: { setLaunchAtLogin($0) }
+                ))
                     .toggleStyle(SwitchToggleStyle(tint: .blue))
                     .labelsHidden() // 라벨 숨김
-                    .onChange(of: launchAtLogin) { _, newValue in
-                        setLaunchAtLogin(newValue)
-                    }
 
                 Spacer().frame(width: 20)
             }
@@ -167,11 +171,26 @@ struct SettingsPopMenu: View {
             } else {
                 try SMAppService.mainApp.unregister()
             }
-            launchAtLoginError = nil
+            syncLaunchAtLoginFromSystem()
         } catch {
+            // 실패 시 실제 시스템 상태로 토글을 되돌린 뒤 오류를 표시한다.
+            syncLaunchAtLoginFromSystem()
             launchAtLoginError = "설정 실패: \(error.localizedDescription)"
-            // 실패 시 실제 시스템 상태로 토글을 되돌림
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+
+    private func syncLaunchAtLoginFromSystem() {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchAtLogin = true
+            launchAtLoginError = nil
+        case .requiresApproval:
+            // 등록은 됐지만 사용자가 시스템 설정에서 허용해야 실제로 동작하는 상태
+            launchAtLogin = true
+            launchAtLoginError = "시스템 설정 → 일반 → 로그인 항목에서 바브라우저를 허용해 주세요."
+        default:
+            launchAtLogin = false
+            launchAtLoginError = nil
         }
     }
 }
