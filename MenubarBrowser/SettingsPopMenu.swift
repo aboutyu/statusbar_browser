@@ -32,7 +32,8 @@ struct SettingsPopMenu: View {
             )
             .padding(.horizontal, 20)
         }
-        .frame(width: 300) // 스크린샷에 맞춰 너비 고정
+        // 영어/일본어 라벨("ショートカット", "Appearance" + 세그먼트 등)이 한국어보다 길어서 너비를 넉넉히 잡는다.
+        .frame(width: 360)
         .padding(.vertical, 10)
         // NSHostingController가 창 생성 시점에 높이를 잘못 추정해 아래가 잘리는 문제가 있어서,
         // 콘텐츠의 실제 높이에 맞춰 세로 크기를 강제로 계산하게 한다.
@@ -130,7 +131,7 @@ struct SettingsPopMenu: View {
 
             Spacer()
 
-            Button("확인") {
+            Button("초기화") {
                 NotificationCenter.default.post(name: .resetPopoverSize, object: nil)
             }
             .buttonStyle(.bordered)
@@ -175,7 +176,7 @@ struct SettingsPopMenu: View {
         } catch {
             // 실패 시 실제 시스템 상태로 토글을 되돌린 뒤 오류를 표시한다.
             syncLaunchAtLoginFromSystem()
-            launchAtLoginError = "설정 실패: \(error.localizedDescription)"
+            launchAtLoginError = String(localized: "설정 실패: \(error.localizedDescription)")
         }
     }
 
@@ -187,7 +188,7 @@ struct SettingsPopMenu: View {
         case .requiresApproval:
             // 등록은 됐지만 사용자가 시스템 설정에서 허용해야 실제로 동작하는 상태
             launchAtLogin = true
-            launchAtLoginError = "시스템 설정 → 일반 → 로그인 항목에서 바브라우저를 허용해 주세요."
+            launchAtLoginError = String(localized: "시스템 설정 → 일반 → 로그인 항목에서 바브라우저를 허용해 주세요.")
         default:
             launchAtLogin = false
             launchAtLoginError = nil

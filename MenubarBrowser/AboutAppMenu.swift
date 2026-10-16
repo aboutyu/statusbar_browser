@@ -29,21 +29,21 @@ struct AboutAppMenu: View {
             Spacer().frame(height: 25)
             
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("개발자")
-                        .foregroundColor(.secondary)
-                        .frame(width: 50, alignment: .leading)
-                    Text("유태훈")
+                // 라벨 길이가 언어마다 달라서(개발자/Developer/開発者) 고정 폭 대신 Grid로 열을 맞춘다.
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                    GridRow {
+                        Text("개발자")
+                            .foregroundColor(.secondary)
+                        Text("유태훈")
+                    }
+                    GridRow {
+                        Text("버전")
+                            .foregroundColor(.secondary)
+                        Text(verbatim: appVersion)
+                    }
                 }
-                
-                HStack(alignment: .firstTextBaseline) {
-                    Text("버   전")
-                        .foregroundColor(.secondary)
-                        .frame(width: 50, alignment: .leading)
-                    Text("\(appVersion)")
-                }
-                
-                Text("Copyright 2026 유태훈 all right reserved.")
+
+                Text("Copyright 2026 유태훈. All rights reserved.")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
                     .padding(.bottom, 20)

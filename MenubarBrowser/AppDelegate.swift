@@ -84,14 +84,21 @@ private final class PopoverWindow: NSWindow {
         // 닫는 동작은 window level이 아니라 startOutsideInteractionMonitors()의 전역
         // NSEvent 모니터로 직접 구현되어 있어서, 레벨을 바꿔도 영향받지 않는다.
         level = .statusBar
-        // .stationary: Exposé/Spaces 전환 시 다른 공간으로 "옮겨지는" 창이 아니라 항상 제자리에
-        // 고정된 창으로 취급되도록 한다. canJoinAllSpaces + stationary는 애플이 패널류 창에
-        // 공식적으로 지원한다고 밝힌 조합이다.
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
+        collectionBehavior = Self.hiddenCollectionBehavior
         isMovable = false
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
     }
+
+    // 숨김 상태: 모든 Space에 걸쳐 있는 창. 어느 Space에서 열든 그 자리에서 바로 보여줄 수 있다.
+    // .stationary: Exposé/Spaces 전환 시 다른 공간으로 "옮겨지는" 창이 아니라 항상 제자리에
+    // 고정된 창으로 취급되도록 한다. canJoinAllSpaces + stationary는 애플이 패널류 창에
+    // 공식적으로 지원한다고 밝힌 조합이다.
+    static let hiddenCollectionBehavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
+    // 열린 상태: 연 Space에만 속하는 창. 다른 Space로 스와이프해도 따라오지 않고 원래 Space에
+    // 열린 채로 남는다(OneDrive 메뉴바 팝오버와 같은 동작). canJoinAllSpaces를 빼는 순간 창은
+    // 현재 활성 Space에 소속된다.
+    static let shownCollectionBehavior: NSWindow.CollectionBehavior = [.fullScreenAuxiliary, .ignoresCycle]
 
     // borderless 창은 기본적으로 key window가 되지 못해 URL 입력창 등이 포커스를 못 받는다.
     override var canBecomeKey: Bool { true }
@@ -185,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: .openSettingsWindow, object: nil
         )
         // ⌘Tab 등 키보드로 다른 앱에 넘어가면 바깥 클릭 모니터가 발동하지 않으므로,
-        // 앱이 비활성화되는 시점에도 팝오버를 닫는다.
+        // 앱이 비활성화되는 시점에도 팝오버를 닫는다(단, Space 전환으로 인한 비활성화는 제외).
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleAppResignActive),
             name: NSApplication.didResignActiveNotification, object: nil
@@ -295,20 +302,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isPopoverVisible: Bool { popoverWindow.alphaValue > 0 }
 
     @objc private func togglePopover(_ sender: Any?) {
-        guard let button = statusItem?.button else { return }
-        if isPopoverVisible {
+        if isPopoverVisible && popoverWindow.isOnActiveSpace {
             hidePopoverWindow(restoreFocus: true)
         } else {
-            let frontmost = NSWorkspace.shared.frontmostApplication
-            previousActiveApp = frontmost == NSRunningApplication.current ? nil : frontmost
-
-            positionPopoverWindow(relativeTo: button)
-            NSApp.activate(ignoringOtherApps: true)
-            popoverWindow.ignoresMouseEvents = false
-            popoverWindow.alphaValue = 1
-            popoverWindow.makeKeyAndOrderFront(nil)
-            startOutsideInteractionMonitors()
+            // 다른 Space에 열어둔 채로 여기서 아이콘/단축키를 누른 경우엔 닫는 대신 이 Space로 옮겨 연다.
+            hidePopoverWindow()
+            showPopoverWindow()
         }
+    }
+
+    private func showPopoverWindow() {
+        guard let button = statusItem?.button else { return }
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        previousActiveApp = frontmost == NSRunningApplication.current ? nil : frontmost
+
+        positionPopoverWindow(relativeTo: button)
+        // 이 시점의 활성 Space에 창을 묶는다.
+        popoverWindow.collectionBehavior = PopoverWindow.shownCollectionBehavior
+        NSApp.activate(ignoringOtherApps: true)
+        popoverWindow.ignoresMouseEvents = false
+        popoverWindow.alphaValue = 1
+        popoverWindow.makeKeyAndOrderFront(nil)
+        startOutsideInteractionMonitors()
     }
 
     // restoreFocus: 우리 앱이 여전히 활성 상태로 남는 닫기(Esc/단축키/아이콘 클릭)에서는 true.
@@ -321,6 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopOutsideInteractionMonitors()
         popoverWindow.makeFirstResponder(nil)
         parkHiddenPopoverWindow()
+        popoverWindow.collectionBehavior = PopoverWindow.hiddenCollectionBehavior
 
         guard restoreFocus, NSApp.isActive else { return }
         // orderOut()/NSApp.hide()는 창을 화면에서 내려 미디어 재생을 멈추므로 쓰지 않고,
@@ -335,19 +351,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         previousActiveApp = nil
     }
 
+    // Space 스와이프로도 앱이 비활성화되는데, 이때는 팝오버를 원래 Space에 열어둔 채로 둬야 한다.
+    // 비활성화 알림이 Space 전환 완료보다 먼저 올 수 있어서 잠시 기다린 뒤, 팝오버가 여전히 지금
+    // 보고 있는 Space에 있을 때(=같은 Space에서 ⌘Tab 등으로 다른 앱으로 간 경우)만 닫는다.
+    // 다른 Space에서 아무 곳이나 클릭하면 전역 클릭 모니터가 닫아준다.
     @objc private func handleAppResignActive() {
-        hidePopoverWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, !NSApp.isActive, self.popoverWindow.isOnActiveSpace else { return }
+            self.hidePopoverWindow()
+        }
     }
 
     // 메뉴바 아이콘 기준으로 팝오버가 놓일 화면 좌표(가로 중앙 정렬, 화면 밖으로 안 나가게 clamp).
+    private static let menuBarGap: CGFloat = 5
+
     private func popoverFrame(size: NSSize, relativeTo button: NSStatusBarButton) -> NSRect? {
         guard let buttonWindow = button.window else { return nil }
         let buttonFrameOnScreen = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
         let screenFrame = buttonWindow.screen?.visibleFrame ?? currentScreenFrame()
 
         let x = max(min(buttonFrameOnScreen.midX - size.width / 2, screenFrame.maxX - size.width), screenFrame.minX)
-        let y = buttonFrameOnScreen.minY - size.height
-        return NSRect(x: x, y: y, width: size.width, height: size.height)
+        // 메뉴바(=visibleFrame 위쪽 경계)와 버튼 아래쪽 중 더 낮은 곳에서 menuBarGap만큼 띄워,
+        // 팝오버 상단이 메뉴바를 덮지 않게 한다.
+        let top = min(buttonFrameOnScreen.minY, screenFrame.maxY) - Self.menuBarGap
+        let height = min(size.height, top - screenFrame.minY)
+        return NSRect(x: x, y: top - height, width: size.width, height: height)
     }
 
     private func positionPopoverWindow(relativeTo button: NSStatusBarButton) {
@@ -458,7 +486,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func clampedSize(_ proposed: NSSize) -> NSSize {
         let screenFrame = currentScreenFrame()
         let minSize = PopoverSizing.minSize(forScreen: screenFrame)
-        let maxSize = NSSize(width: max(screenFrame.width, minSize.width), height: max(screenFrame.height, minSize.height))
+        let maxSize = NSSize(
+            width: max(screenFrame.width, minSize.width),
+            height: max(screenFrame.height - Self.menuBarGap, minSize.height)
+        )
         return NSSize(
             width: min(max(proposed.width, minSize.width), maxSize.width),
             height: min(max(proposed.height, minSize.height), maxSize.height)
@@ -470,7 +501,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleOpenAbout() {
         hidePopoverWindow()
         if aboutWindow == nil {
-            aboutWindow = makeUtilityWindow(title: "바브라우저에 관하여", rootView: AboutAppMenu())
+            aboutWindow = makeUtilityWindow(title: String(localized: "바브라우저에 관하여"), rootView: AboutAppMenu())
         }
         present(aboutWindow)
     }
@@ -478,7 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleOpenSettings() {
         hidePopoverWindow()
         if settingsWindow == nil {
-            settingsWindow = makeUtilityWindow(title: "환경설정", rootView: SettingsPopMenu())
+            settingsWindow = makeUtilityWindow(title: String(localized: "환경설정"), rootView: SettingsPopMenu())
         }
         present(settingsWindow)
     }
